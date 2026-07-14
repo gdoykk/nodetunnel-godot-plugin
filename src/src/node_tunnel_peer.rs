@@ -18,6 +18,24 @@ struct GamePacket {
     transfer_mode: TransferMode,
 }
 
+/// Maximum number of undelivered incoming game-data packets buffered in
+/// `incoming_packets`.
+///
+/// `incoming_packets` is only drained by the game calling
+/// `get_packet_script()` (i.e. `MultiplayerAPI` polling this peer). If the
+/// game stops polling — a paused scene tree, a misconfigured
+/// `MultiplayerAPI`, or a bug on the game's side — while the relay keeps
+/// delivering `GameData`, this buffer would otherwise grow for as long as
+/// data keeps arriving, with no bound. This cap is a safety net against
+/// that failure mode, not a gameplay limit: it's sized well above any
+/// realistic backlog a correctly-polling game would ever accumulate, so it
+/// should only ever be hit when something upstream is stuck. When hit, the
+/// oldest buffered packet is dropped to make room for the newest one; for
+/// `TransferMode::RELIABLE` packets this does mean a packet the relay
+/// guaranteed delivery of is discarded on the receiving end, but keeping
+/// it would just delay the same problem and use unbounded memory instead.
+const MAX_BUFFERED_INCOMING_PACKETS: usize = 4096;
+
 #[derive(GodotClass)]
 #[class(tool, base=MultiplayerPeerExtension)]
 struct NodeTunnelPeer {
@@ -31,6 +49,12 @@ struct NodeTunnelPeer {
     target_peer: i32,
     transfer_mode: TransferMode,
     incoming_packets: Vec<GamePacket>,
+    /// Set once `MAX_BUFFERED_INCOMING_PACKETS` has been hit, so the
+    /// overflow warning is logged once per occurrence of the problem
+    /// instead of once per dropped packet (which could itself flood the
+    /// log while the underlying stall persists). Reset once the game
+    /// catches up and drains the backlog below the cap again.
+    incoming_packets_overflow_warned: bool,
     relay_client: RelayClient,
     outgoing_queue: Vec<(i32, Vec<u8>, Channel)>,
     last_poll_time: Option<Instant>,
@@ -218,6 +242,22 @@ impl NodeTunnelPeer {
                     Channel::Unreliable => TransferMode::UNRELIABLE,
                 };
 
+                if self.incoming_packets.len() >= MAX_BUFFERED_INCOMING_PACKETS {
+                    // The game isn't draining incoming_packets (see
+                    // MAX_BUFFERED_INCOMING_PACKETS doc comment). Drop the
+                    // oldest buffered packet to make room rather than
+                    // growing unboundedly.
+                    self.incoming_packets.remove(0);
+
+                    if !self.incoming_packets_overflow_warned {
+                        godot_warn!(
+                            "[NodeTunnel] incoming packet buffer full ({} packets); the game isn't polling for packets fast enough. Dropping oldest packets to bound memory use.",
+                            MAX_BUFFERED_INCOMING_PACKETS
+                        );
+                        self.incoming_packets_overflow_warned = true;
+                    }
+                }
+
                 self.incoming_packets.push(GamePacket {
                     transfer_mode,
                     from_peer,
@@ -251,6 +291,7 @@ impl IMultiplayerPeerExtension for NodeTunnelPeer {
             target_peer: 0,
             transfer_mode: TransferMode::UNRELIABLE,
             incoming_packets: vec![],
+            incoming_packets_overflow_warned: false,
             relay_client: RelayClient::new(),
             outgoing_queue: vec![],
             last_poll_time: None,
@@ -270,6 +311,14 @@ impl IMultiplayerPeerExtension for NodeTunnelPeer {
     fn get_packet_script(&mut self) -> PackedByteArray {
         if !self.incoming_packets.is_empty() {
             let packet = self.incoming_packets.remove(0);
+
+            // The game is actively draining the backlog again; let a
+            // future overflow be warned about again instead of staying
+            // silently suppressed forever.
+            if self.incoming_packets.len() < MAX_BUFFERED_INCOMING_PACKETS {
+                self.incoming_packets_overflow_warned = false;
+            }
+
             PackedByteArray::from(packet.data.as_slice())
         } else {
             PackedByteArray::new()
@@ -378,6 +427,7 @@ impl IMultiplayerPeerExtension for NodeTunnelPeer {
         // get delivered under the new session as if they belonged to it.
         self.incoming_packets.clear();
         self.outgoing_queue.clear();
+        self.incoming_packets_overflow_warned = false;
     }
 
     fn disconnect_peer(&mut self, _p_peer: i32, _p_force: bool) {}
