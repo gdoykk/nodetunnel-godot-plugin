@@ -8,8 +8,8 @@ name = "nodetunnel"
 crate-type = ["cdylib"]
 
 [dependencies]
-nodetunnel-protocol = { path = "../../protocol" }
+nodetunnel-protocol = { git = "https://github.com/gdoykk/nodetunnel-protocol.git" }
 godot = { version = "0.5.4", features = ["api-4-7"] }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
-paperudp = { path = "../../paperudp"}
+paperudp = { git = "https://github.com/gdoykk/nodetunnel-paperudp.git" }
