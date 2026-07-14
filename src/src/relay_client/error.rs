@@ -1,5 +1,4 @@
 use thiserror::Error;
-use crate::transport::error::TransportError;
 
 #[derive(Error, Debug)]
 pub enum RelayClientError {
@@ -7,7 +6,7 @@ pub enum RelayClientError {
     TransportNotInitialized,
 
     #[error("Failed to send packet: {0}")]
-    SendPacketError(#[from] TransportError),
+    SendPacketError(#[from] std::io::Error),
 
     #[error("Invalid packet type")]
     InvalidPacketType,

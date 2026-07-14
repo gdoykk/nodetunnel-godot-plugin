@@ -1,4 +1,5 @@
-use crate::protocol::packet::RoomInfo;
+use nodetunnel_protocol::packet::RoomInfo;
+use nodetunnel_protocol::ClientId;
 use crate::transport::common::Channel;
 
 #[derive(Debug)]
@@ -7,7 +8,7 @@ pub enum RelayEvent {
     Authenticated,
     RoomsReceived { rooms: Vec<RoomInfo> },
     RoomJoined { room_id: String, peer_id: i32 },
-    PeerJoinAttempt { client_id: u64, metadata: String },
+    PeerJoinAttempt { client_id: ClientId, metadata: String },
     PeerJoinedRoom { peer_id: i32 },
     GameDataReceived { channel: Channel, from_peer: i32, data: Vec<u8> },
     PeerLeftRoom { peer_id: i32 },

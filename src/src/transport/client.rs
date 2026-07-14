@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use paperudp::channel::DecodeResult;
 use paperudp::packet::PacketType;
 use crate::transport::common::Channel;
+use crate::transport::error::TransportError;
 
 pub struct ClientTransport {
     socket: UdpSocket,
@@ -21,7 +22,7 @@ pub enum ClientEvent {
 }
 
 impl ClientTransport {
-    pub fn new(server_addr: SocketAddr) -> Result<Self, std::io::Error> {
+    pub fn new(server_addr: SocketAddr) -> Result<Self, TransportError> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
 
@@ -71,7 +72,12 @@ impl ClientTransport {
                             }
 
                             if let Some(ack) = ack_packet {
-                                self.socket.send_to(&ack, self.server_addr).unwrap();
+                                // A failed ack send just means the server may
+                                // resend the packet later; it must not crash
+                                // the game over a transient socket error.
+                                if let Err(e) = self.socket.send_to(&ack, self.server_addr) {
+                                    eprintln!("[NodeTunnel] failed to send ack: {e}");
+                                }
                             }
                         }
                         DecodeResult::Ack { .. } => {}
@@ -138,7 +144,12 @@ impl ClientTransport {
 
     fn do_resends(&mut self) {
         for packet in self.channel.collect_resends(Duration::from_millis(100)) {
-            self.try_send_packet(packet).unwrap();
+            // Same reasoning as elsewhere: a resend failing must not crash
+            // the client. The packet will be retried again on the next
+            // resend tick if it's still unacknowledged.
+            if let Err(e) = self.try_send_packet(packet) {
+                eprintln!("[NodeTunnel] failed to resend packet: {e}");
+            }
         }
     }
 

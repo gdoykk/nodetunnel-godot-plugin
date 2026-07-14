@@ -1,7 +1,6 @@
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::str::FromStr;
+use std::net::ToSocketAddrs;
 use std::time::{Duration, Instant};
-use godot::builtin::{Array, Callable, Dictionary, GString, PackedByteArray, Variant};
+use godot::builtin::{Array, Callable, GString, PackedByteArray, Variant, VarDictionary};
 use godot::prelude::{godot_api, GodotClass};
 use godot::classes::{IMultiplayerPeerExtension, MultiplayerPeerExtension};
 use godot::classes::multiplayer_peer::{ConnectionStatus, TransferMode};
@@ -162,8 +161,8 @@ impl NodeTunnelPeer {
                 let mut room_array = Array::new();
 
                 for room in rooms {
-                    let mut room_dict = Dictionary::new();
-                    room_dict.set("id", room.id.clone());
+                    let mut room_dict = VarDictionary::new();
+                    room_dict.set("id", room.join_code.clone());
                     room_dict.set("metadata", room.metadata.clone());
 
                     room_array.push(&room_dict.to_variant());
@@ -192,11 +191,17 @@ impl NodeTunnelPeer {
                         allowed = self.join_validation.call(&[metadata.to_variant()]).booleanize()
                     }
 
-                    self.relay_client.send_join_response(
+                    // A failed send here must not crash the host's game:
+                    // the relay will simply time the joining peer out if
+                    // this response never arrives, rather than every
+                    // player's session being torn down by a panic.
+                    if let Err(e) = self.relay_client.send_join_response(
                         self.room_id.to_string(),
                         client_id,
                         allowed
-                    ).expect("todo");
+                    ) {
+                        godot_error!("[NodeTunnel] Failed to send join response: {}", e);
+                    }
                 }
             }
             RelayEvent::PeerJoinedRoom { peer_id } => {
