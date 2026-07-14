@@ -370,6 +370,14 @@ impl IMultiplayerPeerExtension for NodeTunnelPeer {
 
         self.unique_id = 0;
         self.connection_status = ConnectionStatus::DISCONNECTED;
+
+        // Without clearing these, packets queued against the old session
+        // (e.g. game data received right before disconnecting, or game
+        // data queued for send but not yet flushed) would still be
+        // sitting here the next time `connect_to_relay` is called and
+        // get delivered under the new session as if they belonged to it.
+        self.incoming_packets.clear();
+        self.outgoing_queue.clear();
     }
 
     fn disconnect_peer(&mut self, _p_peer: i32, _p_force: bool) {}
